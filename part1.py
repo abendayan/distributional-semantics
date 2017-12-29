@@ -7,7 +7,7 @@ PATH_FILE = "wikipedia.sample.trees.lemmatized"
 start_time = time.time()
 THRESHOLD = 100
 SIMILAR = 20
-MIN_CO = 2
+MIN_CO = 0
 
 def passed_time(previous_time):
     return round(time.time() - previous_time, 3)
@@ -16,11 +16,15 @@ class Corpus:
     def __init__(self):
         self.context_words = {}
         self.context_words_two = {}
+        self.context_words_dep = {}
         self.context_words_pmi = {}
         self.context_words_two_pmi = {}
+        self.context_words_dep_pmi = {}
         self.words = {}
         self.words_to_ix = {  }
         self.words_count = {}
+        self.features_dep = {}
+        self.features_dep_to_ix = {}
         self.define_data()
         print "read all of the data " + str(passed_time(start_time))
         self.find_similar_words_in_sentence()
@@ -33,7 +37,6 @@ class Corpus:
 
     def find_similar_words_in_window(self):
         self.helper_find(self.context_words_two_pmi)
-
 
     def helper_find(self, dictionnary):
         for test_word in WORDS:
@@ -78,13 +81,24 @@ class Corpus:
         words = open(PATH_FILE, "r").read().split("\n")
         sentences = []
         sentence = []
+        dependencies = []
         two_words_windows = []
+        all_deps = []
+        deps = []
         prev_prev_word = None
         prev_word = None
         total_count = 0.0
         for i, word in enumerate(words):
             if word != "" and len(word) > 1:
                 ID, FORM, LEMMA, CPOSTAG, POSTAG, FEATS, HEAD, DEPREL, PHEAD, PDEPREL = word.split()
+                vector = {
+                # "ID":ID,
+                "LEMMA":LEMMA,
+                "POSTAG":POSTAG,
+                "HEAD":HEAD,
+                "DEPREL":DEPREL,
+                }
+                dependencies.append(vector)
                 if POSTAG in CONTENT_CLASSES:
                     if LEMMA not in self.words:
                         self.words[LEMMA] = len(self.words)
@@ -93,8 +107,10 @@ class Corpus:
 
                     if self.words[LEMMA] not in self.context_words:
                         self.context_words[self.words[LEMMA]] = {}
+                        self.context_words_dep[self.words[LEMMA]] = {}
                         self.context_words_two[self.words[LEMMA]] = {}
                         self.context_words_pmi[self.words[LEMMA]] = {}
+                        self.context_words_dep_pmi[self.words[LEMMA]] = {}
                         self.context_words_two_pmi[self.words[LEMMA]] = {}
 
                     self.words_count[self.words[LEMMA]] += 1
@@ -103,11 +119,28 @@ class Corpus:
                 if sentence != []:
                     sentences.append(sentence)
                     sentence = []
+                if dependencies != []:
+                    for vector in dependencies:
+                        parent = dependencies[vector["HEAD"]]
+                        if parent["POSTAG"] == "IN": #parent is preposition
+                            parent_parent = dependencies[parent["HEAD"]]
+                            # parent parent is to be connected to vector
+                            feature_vector = (parent_parent["LEMMA"], parent["DEPREL"], "up")
+                            feature_parent_parent = (vector["LEMMA"], parent["DEPREL"], "down")
+                            if feature_vector not in self.features_dep:
+                                self.features_dep[feature_vector] = len(self.features_dep)
+                            if feature_parent_parent not in self.features_dep:
+                                self.features_dep[feature_parent_parent] = len(self.features_dep)
+                            deps.append(self.features_dep[feature_vector])
+                            deps.append(self.features_dep[feature_parent_parent])
+                    if deps != []:
+                        all_deps.append(deps)
         self.words_count =  { id:count for id,count in self.words_count.iteritems() if count > THRESHOLD }
         for id, count in self.words_count.iteritems():
             total_count += count
         self.words = { word:id for word,id in self.words.iteritems() if id in self.words_count }
         self.words_to_ix = { id: word for word, id in self.words.iteritems() }
+        self.features_dep_to_ix = { id: feature for feature, id in self.features_dep.iteritems() }
         sentences = [ [ word for word in sentence if word in self.words_to_ix ] for sentence in sentences ]
         print "finish reading the corpus " + str(passed_time(start_time))
         for i, sentence in enumerate(sentences):
@@ -120,7 +153,7 @@ class Corpus:
                                 self.context_words[id_word][id_other] = freq
                             else:
                                 self.context_words[id_word][id_other] += freq
-                            if k < j + 2 or k > j - 2:
+                            if k < j + 2 and k > j - 2:
                                 if id_other not in self.context_words_two[id_word]:
                                     self.context_words_two[id_word][id_other] = freq
                                 else:
